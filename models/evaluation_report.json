@@ -1,0 +1,130 @@
+{
+  "timestamp": "2026-05-03T03:31:13.180761",
+  "feature_count": 17,
+  "feature_names": [
+    "feature_0",
+    "feature_1",
+    "feature_2",
+    "feature_3",
+    "feature_4",
+    "feature_5",
+    "feature_6",
+    "feature_7",
+    "feature_8",
+    "feature_9",
+    "feature_10",
+    "feature_11",
+    "feature_12",
+    "feature_13",
+    "feature_14",
+    "returns_1d",
+    "volatility_5d"
+  ],
+  "models": {
+    "logistic_regression": {
+      "metrics": {
+        "auc": 0.48535864317462424,
+        "precision_at_k": 0.16666666666666666,
+        "recall_at_k": 0.11064425770308123,
+        "f1": 0.24134248665141111
+      },
+      "top_features": [
+        {
+          "feature": "returns_1d",
+          "importance": 0.856007,
+          "rank": 1
+        },
+        {
+          "feature": "volatility_5d",
+          "importance": 0.676335,
+          "rank": 2
+        },
+        {
+          "feature": "feature_1",
+          "importance": 0.247858,
+          "rank": 3
+        },
+        {
+          "feature": "feature_0",
+          "importance": 0.213356,
+          "rank": 4
+        },
+        {
+          "feature": "feature_9",
+          "importance": 0.185945,
+          "rank": 5
+        }
+      ]
+    },
+    "lightgbm": {
+      "metrics": {
+        "auc": 0.9984387197501952,
+        "precision_at_k": 1.0,
+        "recall_at_k": 0.6722689075630252,
+        "f1": 0.8793650793650793
+      },
+      "top_features": [
+        {
+          "feature": "volatility_5d",
+          "importance": 525.0,
+          "rank": 1
+        },
+        {
+          "feature": "returns_1d",
+          "importance": 392.0,
+          "rank": 2
+        },
+        {
+          "feature": "feature_0",
+          "importance": 123.0,
+          "rank": 3
+        },
+        {
+          "feature": "feature_1",
+          "importance": 11.0,
+          "rank": 4
+        },
+        {
+          "feature": "feature_4",
+          "importance": 6.0,
+          "rank": 5
+        }
+      ]
+    },
+    "xgboost": {
+      "metrics": {
+        "auc": 0.9877832987349829,
+        "precision_at_k": 0.9666666666666667,
+        "recall_at_k": 0.6484593837535014,
+        "f1": 0.854544156493182
+      },
+      "top_features": [
+        {
+          "feature": "returns_1d",
+          "importance": 0.406029,
+          "rank": 1
+        },
+        {
+          "feature": "volatility_5d",
+          "importance": 0.372753,
+          "rank": 2
+        },
+        {
+          "feature": "feature_4",
+          "importance": 0.129438,
+          "rank": 3
+        },
+        {
+          "feature": "feature_9",
+          "importance": 0.020857,
+          "rank": 4
+        },
+        {
+          "feature": "feature_1",
+          "importance": 0.017419,
+          "rank": 5
+        }
+      ]
+    }
+  }
+}

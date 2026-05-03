@@ -1,0 +1,63 @@
+# CreditMosaic AI Configuration
+
+# PostgreSQL operational database
+postgresql:
+  host: localhost
+  port: 5432
+  database: creditmosaic
+  user: postgres
+  password: password
+
+# DuckDB analytical database
+duckdb:
+  path: creditmosaic_analytical.db
+
+# News collectors configuration
+news_collectors:
+  - source: yahoo
+  - source: gdelt
+  # - source: newsapi
+  #   api_key: YOUR_NEWSAPI_KEY
+
+# Ticker list configuration
+ticker_list:
+  path: tickers.csv
+
+# LLM providers
+# Secrets are read from environment variables. Do not put raw API keys here.
+# Longcat is the default OpenAI-compatible provider for this project.
+llm_providers:
+  longcat:
+    provider: openai
+    api_key: ${LONGCAT_API_KEY}
+    model: LongCat-Flash-Chat
+    base_url: https://api.longcat.chat/openai
+    max_tokens: 1500
+    temperature: 0.3
+  # openai:
+  #   provider: openai
+  #   api_key: ${OPENAI_API_KEY}
+  #   model: gpt-4-turbo-preview
+  #   base_url: ""
+  #   max_tokens: 1500
+  #   temperature: 0.3
+  # qwen:
+  #   provider: qwen
+  #   api_key: YOUR_DASHSCOPE_API_KEY
+  #   model: qwen-turbo
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   max_tokens: 1500
+  #   temperature: 0.3
+  # deepseek:
+  #   provider: deepseek
+  #   api_key: YOUR_DEEPSEEK_API_KEY
+  #   model: deepseek-chat
+  #   base_url: https://api.deepseek.com/v1
+  #   max_tokens: 1500
+  #   temperature: 0.3
+
+# Default LLM provider
+default_provider: longcat
+
+# FinBERT model
+finbert_model: ProsusAI/finbert
