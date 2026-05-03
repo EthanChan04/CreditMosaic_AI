@@ -1,56 +1,84 @@
 # CreditMosaic AI
 
-CreditMosaic AI 是一个基于 LLM 新闻信号的跨市场信用风险预警 MVP。项目聚焦“新闻文本如何通过股票市场、信用代理变量和公司风险指标产生异步反应”，将非结构化新闻转化为可建模、可解释、可回测的信用风险信号。
+**CreditMosaic AI** is a research-oriented financial technology MVP for news-driven, cross-market credit risk monitoring. The project investigates whether structured signals extracted from firm-level news by large language models can improve the identification of short-horizon credit risk deterioration, and whether equity-market and credit-proxy reactions exhibit measurable lead-lag patterns after firm-specific news events.
 
-本项目用于科研、教学和金融科技应用演示，不构成投资建议、交易建议或信用评级意见。
+The system is designed for academic research, teaching, and financial technology prototyping. It does **not** provide investment advice, trading recommendations, or credit rating opinions.
 
-## 1. 项目定位
+## 1. Research Motivation
 
-CreditMosaic AI 的第一版目标不是聊天助手，而是一个新闻驱动的信用风险预警平台：
+Public firm news contains information about liquidity pressure, refinancing risk, litigation, regulatory exposure, earnings deterioration, management changes, and other credit-relevant events. Traditional sentiment models often compress such information into coarse positive, neutral, or negative scores. CreditMosaic AI instead treats news as a source of structured credit risk factors.
 
-- 输入公司 ticker 或投资组合。
-- 采集公司新闻、股价、成交量、基本面和信用代理变量。
-- 使用 Longcat/OpenAI-compatible LLM 抽取结构化 `LLMNewsSignal`。
-- 使用 FinBERT、Logistic Regression、LightGBM、XGBoost 做基线和主模型对照。
-- 展示公司风险、新闻证据、跨市场反应、组合风险贡献和 Markdown 风险报告。
+The central research question is:
 
-## 2. 当前模块
+> Can LLM-derived credit risk signals from firm-level news improve short-horizon corporate risk monitoring and help explain asynchronous reactions across equity markets and credit-proxy markets?
+
+The project is inspired by research themes in machine learning asset pricing, corporate bond return prediction, financial text analysis, interpretable factor modeling, and cross-market information transmission.
+
+## 2. MVP Scope
+
+The first version is intentionally scoped as an interpretable risk monitoring platform rather than a general-purpose financial chatbot.
+
+The MVP supports the following workflow:
+
+1. Input a firm ticker or a weighted portfolio.
+2. Collect firm news, equity-market data, financial fundamentals, and credit-proxy variables.
+3. Extract structured news risk signals using an OpenAI-compatible LLM provider.
+4. Construct daily firm-level features and proxy risk labels.
+5. Train baseline and tree-based risk models.
+6. Analyze market reactions and lead-lag patterns.
+7. Display firm risk, news evidence, portfolio risk contribution, and one-page Markdown risk reports.
+
+## 3. Repository Structure
 
 ```text
 creditmosaic-ai/
-  apps/api/                 FastAPI 后端 API
-  db/                       PostgreSQL schema 与迁移
-  models/                   已训练模型与评估报告
-  pipelines/ingestion/      新闻、行情、基本面、信用代理变量采集
-  pipelines/risk/           特征工程、风险标签、模型训练、风险评分
-  pipelines/reaction/       跨市场反应和 lead-lag 分析
-  services/                 LLM provider、FinBERT、新闻抽取、风险/反应服务
-  web/                      Next.js 前端
-  docker-compose.yml        本地一键启动入口
+  apps/api/                 FastAPI backend application
+  db/                       PostgreSQL schema and migrations
+  models/                   Trained model artifacts and evaluation reports
+  pipelines/ingestion/      News, market data, fundamentals, and proxy data ingestion
+  pipelines/risk/           Feature engineering, label generation, model training, scoring
+  pipelines/reaction/       Cross-market event reaction and lead-lag analysis
+  services/                 LLM provider, FinBERT baseline, extraction and model services
+  web/                      Next.js frontend application
+  docker-compose.yml        Local multi-service deployment entry point
 ```
 
-## 3. 技术栈
+## 4. Technical Stack
 
-| 层级 | 当前实现 |
+| Layer | Implementation |
 | --- | --- |
-| 前端 | Next.js, React, TypeScript, ECharts |
-| 后端 | FastAPI, Python |
-| 数据库 | PostgreSQL, DuckDB |
-| LLM | Longcat OpenAI-compatible provider, 可扩展 OpenAI/Qwen/DeepSeek |
+| Frontend | Next.js, React, TypeScript, ECharts |
+| Backend | FastAPI, Python |
+| Operational database | PostgreSQL |
+| Analytical storage | DuckDB |
+| LLM provider | Longcat through an OpenAI-compatible interface |
+| Extensible LLM interfaces | OpenAI, Qwen, DeepSeek-compatible provider classes |
 | NLP baseline | FinBERT |
-| 风险模型 | Logistic Regression, LightGBM, XGBoost |
-| 可解释性 | Top feature importance, SHAP 支持 |
-| 部署 | Docker Compose, 本地优先 |
+| Risk models | Logistic Regression, LightGBM, XGBoost |
+| Interpretability | Feature importance and SHAP-compatible tree explanations |
+| Deployment | Docker Compose for local MVP deployment |
 
-## 4. 环境变量
+## 5. Core Data Objects
 
-复制 `.env.example` 为 `.env`，只在 `.env` 或 shell 环境里放真实密钥。
+The project follows the data objects defined in the execution plan:
+
+- `Company`: firm identifiers, sector, exchange, market capitalization, and financial metrics.
+- `NewsItem`: firm-level news text with source, publication time, and URL.
+- `LLMNewsSignal`: structured sentiment, credit risk score, event type, horizon, evidence spans, and confidence.
+- `MarketReaction`: abnormal return, abnormal volume, volatility change, credit-proxy movement, and reaction lag.
+- `RiskAlert`: alert-level risk summary and recommended review action.
+
+These objects are persisted through PostgreSQL tables defined in `db/schema.sql`.
+
+## 6. Environment Variables
+
+Copy `.env.example` to `.env` and place local secrets only in `.env` or in the shell environment.
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-核心配置：
+Minimal configuration:
 
 ```env
 POSTGRES_HOST=localhost
@@ -65,57 +93,57 @@ WEB_PORT=3000
 LONGCAT_API_KEY=
 ```
 
-`config.yaml` 中默认 LLM provider 是 `longcat`，密钥通过 `${LONGCAT_API_KEY}` 注入，不应写入仓库文件。
+The default LLM provider is `longcat`. The key is injected through `${LONGCAT_API_KEY}` in `config.yaml`; raw API keys should never be written into repository files.
 
-## 5. Docker Compose 启动
+## 7. Running with Docker Compose
 
-如果本机已安装 Docker：
+If Docker is installed, the complete local stack can be started with:
 
 ```powershell
 docker compose up --build
 ```
 
-服务地址：
+Service endpoints:
 
-- Web: <http://localhost:3000>
-- API: <http://localhost:8000>
-- OpenAPI: <http://localhost:8000/docs>
+- Frontend: <http://localhost:3000>
+- Backend API: <http://localhost:8000>
+- OpenAPI documentation: <http://localhost:8000/docs>
 - PostgreSQL: `localhost:5432`
 
-PostgreSQL 首次启动时会自动执行 `db/schema.sql`。如果修改 schema 后需要重新初始化数据库，请先确认数据可删除，再移除 compose volume。
+The PostgreSQL service mounts and executes `db/schema.sql` during first initialization. To recreate the database from scratch, only after confirming that local data can be discarded:
 
 ```powershell
 docker compose down -v
 docker compose up --build
 ```
 
-## 6. 本地开发启动
+## 8. Local Development
 
-### 6.1 后端
+### Backend
 
 ```powershell
 cd F:\Fintech\creditmosaic-ai
 .venv\Scripts\python.exe -m uvicorn apps.api.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-后端健康检查：
+Health check:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/health
 ```
 
-### 6.2 前端
+### Frontend
 
 ```powershell
 cd F:\Fintech\creditmosaic-ai\web
 npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-前端默认将 `/api/*` 代理到 `NEXT_PUBLIC_API_URL`，未设置时使用 `http://localhost:8000`。
+The frontend proxies `/api/*` requests to `NEXT_PUBLIC_API_URL`. If the variable is not set, it defaults to `http://localhost:8000`.
 
-## 7. 数据准备
+## 9. Database and Data Pipeline
 
-数据库 schema 位于 `db/schema.sql`，核心表包括：
+The PostgreSQL schema is defined in `db/schema.sql`. Core tables include:
 
 - `companies`
 - `news_items`
@@ -129,64 +157,84 @@ npm run dev -- --hostname 127.0.0.1 --port 3000
 - `portfolio_analyses`
 - `risk_reports`
 
-数据管线入口位于 `pipelines/ingestion/`，目标是完成新闻、股价、基本面、信用代理变量的批量采集和实体匹配。
+The ingestion layer in `pipelines/ingestion/` is responsible for:
 
-## 8. 模型与实验
+- constructing the default ticker universe,
+- collecting news and market data,
+- collecting financial fundamentals,
+- collecting credit-proxy variables such as HYG, LQD, and VIX,
+- performing company entity matching,
+- writing structured records into PostgreSQL.
 
-风险建模代码位于 `pipelines/risk/`：
+## 10. LLM News Signal Extraction
 
-- `risk_labeler.py`: 构造异常收益、异常成交量、波动率跳升、信用代理恶化等标签。
-- `feature_engineer.py`: 合并市场特征、财务特征、LLM 新闻特征和 FinBERT 特征。
-- `model_trainer.py`: 训练 Logistic Regression、LightGBM、XGBoost。
-- `risk_scorer.py`: 输出公司日频风险分数和 Top drivers。
+The LLM extraction service converts unstructured news into structured credit risk signals. The target output includes:
 
-当前模型文件位于 `models/`，评估结果位于 `models/evaluation_report.json`。
+- `sentiment_score`,
+- `credit_risk_score`,
+- `event_type`,
+- `risk_horizon`,
+- `market_impact_type`,
+- `evidence_spans`,
+- `confidence`.
 
-## 9. API 概览
+The project currently uses Longcat as the default OpenAI-compatible provider. Provider abstraction is implemented so that OpenAI, Qwen, and DeepSeek-compatible endpoints can be configured with the same service interface.
 
-主要 API：
+FinBERT is used as a traditional financial NLP baseline for sentiment comparison.
 
-| API | 用途 |
+## 11. Risk Modeling
+
+Risk modeling code is located in `pipelines/risk/`:
+
+- `risk_labeler.py` constructs proxy labels such as abnormal negative returns, abnormal volume spikes, volatility jumps, credit-proxy widening, and distress-news follow-up indicators.
+- `feature_engineer.py` merges market features, financial fundamentals, LLM news signals, and FinBERT sentiment features into daily firm-level features.
+- `model_trainer.py` trains Logistic Regression, LightGBM, and XGBoost models.
+- `risk_scorer.py` produces firm-level daily risk scores and top feature drivers.
+
+Model artifacts are stored in `models/`, and the current evaluation summary is stored in `models/evaluation_report.json`.
+
+## 12. Cross-Market Reaction Analysis
+
+The reaction analysis module studies how news events are reflected in:
+
+- equity returns,
+- trading volume,
+- realized volatility,
+- credit-proxy variables such as HYG, LQD, and VIX.
+
+The lead-lag module estimates whether equity variables lead credit-proxy variables, whether credit-proxy variables lead equity variables, or whether both markets react simultaneously.
+
+## 13. API Overview
+
+| Endpoint | Purpose |
 | --- | --- |
-| `POST /api/news/extract` | 单条新闻 LLM 风险信号抽取 |
-| `GET /api/company/{ticker}/risk` | 公司风险总览 |
-| `GET /api/company/{ticker}/signals` | 公司新闻信号列表 |
-| `POST /api/risk/labels/generate` | 生成风险标签 |
-| `POST /api/risk/models/train` | 训练风险模型 |
-| `POST /api/risk/scores/generate` | 生成风险评分 |
-| `POST /api/reaction/analyze` | 跨市场反应分析 |
-| `POST /api/reaction/lag` | lead-lag 滞后分析 |
-| `POST /api/portfolio/analyze` | 投资组合风险贡献 |
-| `POST /api/portfolio/report` | 组合 Markdown 风险报告 |
-| `POST /api/report/generate` | 公司 Markdown 风险报告 |
-| `GET /api/alerts` | 风险预警列表 |
+| `POST /api/news/extract` | Extract structured LLM news risk signals |
+| `GET /api/company/{ticker}/risk` | Retrieve firm-level risk overview |
+| `GET /api/company/{ticker}/signals` | Retrieve firm-level news signals |
+| `POST /api/risk/labels/generate` | Generate proxy risk labels |
+| `POST /api/risk/models/train` | Train risk models |
+| `POST /api/risk/scores/generate` | Generate risk scores |
+| `POST /api/reaction/analyze` | Analyze cross-market reactions |
+| `POST /api/reaction/lag` | Analyze lead-lag relationships |
+| `POST /api/portfolio/analyze` | Analyze portfolio risk contribution |
+| `POST /api/portfolio/report` | Generate a portfolio Markdown report |
+| `POST /api/report/generate` | Generate a firm-level Markdown report |
+| `GET /api/alerts` | Retrieve risk alerts |
 
-## 10. 前端页面
+## 14. Frontend Pages
 
-| 页面 | 功能 |
+| Route | Function |
 | --- | --- |
-| `/` | 项目首页和搜索入口 |
-| `/company/[ticker]` | 公司风险总览 |
-| `/news/[news_id]` | 新闻信号证据页 |
-| `/reaction/[ticker]` | 跨市场反应页 |
-| `/portfolio` | 组合风险分析与组合报告 |
-| `/report/[ticker]` | 公司风险报告 |
+| `/` | Search and project landing interface |
+| `/company/[ticker]` | Firm-level risk dashboard |
+| `/news/[news_id]` | News signal evidence page |
+| `/reaction/[ticker]` | Cross-market reaction page |
+| `/portfolio` | Portfolio risk analysis and portfolio report generation |
+| `/report/[ticker]` | Firm-level Markdown risk report |
 
-## 11. Demo 闭环
+## 15. Reproducibility Checks
 
-目标演示路径：
-
-```text
-输入公司或组合
--> 查看新闻风险信号
--> 查看跨市场反应
--> 查看风险评分和 Top drivers
--> 生成一页式 Markdown 风险报告
-```
-
-推荐演示 ticker：`AAPL`、`TSLA`、`NVDA`、`JPM`、`BA`。
-
-## 12. 验证命令
+The following commands were used as lightweight project-level checks:
 
 ```powershell
 cd F:\Fintech\creditmosaic-ai
@@ -211,45 +259,40 @@ npm run lint
 npm run build
 ```
 
-## 13. 当前限制
+## 16. Demonstration Workflow
 
-- 免费新闻源覆盖不完整，部分新闻可能延迟或缺正文。
-- MVP 使用 HYG、LQD、VIX 等信用代理变量，不直接依赖 Bloomberg、TRACE 或 Refinitiv。
-- LLM 输出需要 JSON schema 校验和人工抽样复核。
-- 风险分数是科研和风险监控信号，不是投资建议。
-- 完整科研验收仍需要补齐 10 家以上公司案例和 Model A-E 对照实验。
+A typical MVP demonstration follows this sequence:
 
-## 14. 安全与密钥管理
+```text
+Input a ticker or portfolio
+-> inspect news-derived credit risk signals
+-> inspect cross-market reactions
+-> inspect risk scores and top drivers
+-> generate a one-page Markdown risk report
+```
 
-- 不要把 `.env`、真实 API key、数据库密码或访问令牌提交到 Git。
-- Longcat key 只通过 `LONGCAT_API_KEY` 环境变量注入。
-- `.gitignore` 和 `.dockerignore` 已排除 `.env`、`.venv`、`web/node_modules`、`web/.next`、数据库文件和缓存文件。
-- `config.yaml` 只保留 `${LONGCAT_API_KEY}` 形式的变量引用。
-- 推送前建议运行一次明文密钥扫描，确认没有 `sk-...`、真实 token 或私密配置进入源码。
+Suggested demonstration tickers include `AAPL`, `TSLA`, `NVDA`, `JPM`, and `BA`.
 
-## 15. 运行前提与排障
+## 17. Security and Secret Management
 
-完整运行需要以下服务可用：
+- Do not commit `.env`, raw API keys, database passwords, or access tokens.
+- Longcat credentials should be supplied only through `LONGCAT_API_KEY`.
+- `.gitignore` and `.dockerignore` exclude `.env`, `.venv`, `web/node_modules`, `web/.next`, local database files, and cache directories.
+- `config.yaml` uses variable references rather than raw secrets.
+- Before publishing, scan the repository for `sk-...`, tokens, and other private credentials.
 
-- PostgreSQL: `localhost:5432`，数据库名默认 `creditmosaic`。
-- FastAPI: `localhost:8000`。
-- Next.js: `localhost:3000`。
-- Longcat API key: 仅当调用 LLM 抽取或报告生成时需要。
+## 18. Current Limitations
 
-常见问题：
+- Free news sources may have incomplete coverage, delayed availability, or missing full text.
+- The MVP uses credit proxies rather than TRACE, Bloomberg, Refinitiv, or CDS data.
+- LLM outputs require JSON validation and manual sampling for research-quality assurance.
+- Risk scores are research and monitoring signals, not investment recommendations.
+- Full academic validation still requires a larger sample, at least ten case studies, and formal Model A-E comparisons.
 
-| 现象 | 处理 |
-| --- | --- |
-| `/api/*` 返回 500 或连接失败 | 确认 FastAPI 后端已启动，且 `NEXT_PUBLIC_API_URL` 指向正确后端 |
-| 后端启动时报数据库连接失败 | 确认 PostgreSQL 正在运行，或使用 `docker compose up --build` |
-| LLM provider 数量为 0 | 检查 `.env` 或 shell 是否设置 `LONGCAT_API_KEY` |
-| 首次 Docker 启动后没有表 | 确认 `db/schema.sql` 已挂载；必要时执行 `docker compose down -v` 后重建 |
-| FinBERT 加载慢 | 首次运行会下载模型，属于正常现象 |
+## 19. Future Work
 
-## 16. 后续路线
-
-1. 补齐 50 家公司 6 个月可查询样本数据。
-2. 完成 Model A-E 对照实验和 LLM 相对 FinBERT 的增量价值分析。
-3. 输出 10 家公司案例研究和研究简报。
-4. 增加 Prefect 调度和更完整的数据质量报告。
-5. 扩展 PDF 报告、watchlist 和风险订阅。
+1. Expand to at least 50 firms with six months of queryable news and market data.
+2. Complete Model A-E experiments comparing traditional variables, FinBERT, LLM signals, and combined models.
+3. Produce a structured case study report for at least ten firms.
+4. Add Prefect-based scheduled data pipelines and richer data quality reports.
+5. Extend report export to PDF and add watchlist-based risk monitoring.
