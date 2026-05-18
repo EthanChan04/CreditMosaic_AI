@@ -61,14 +61,16 @@ class RiskModelService:
             end_date = datetime.now()
 
         engineer = FeatureEngineer(self.db)
-        X, y, _ = engineer.build_feature_matrix(tickers, end_date)
+        X, y, meta = engineer.build_feature_matrix(tickers, end_date)
 
         if X.empty:
             logger.error("No features available for training")
             return {'error': 'No features available'}
 
+        dates = meta['date'] if meta is not None and 'date' in meta.columns else None
+
         trainer = RiskModelTrainer(str(self.model_dir))
-        results = trainer.train_all(X, y, n_splits)
+        results = trainer.train_all(X, y, dates=dates, n_splits=n_splits)
 
         return results
 

@@ -277,7 +277,9 @@ class FinBERTComparator:
 
         Args:
             text: 文本
-            llm_signal: LLM信号（如果为None，则使用LLM提取器）
+            llm_signal: Pre-fetched LLM signal (LLMNewsSignal or dict).
+                       If None and llm_extractor is set, extraction is skipped
+                       because it requires async context — pass pre-fetched signals instead.
 
         Returns:
             对比结果
@@ -285,11 +287,9 @@ class FinBERTComparator:
         # FinBERT分析
         finbert_result = self.finbert.analyze_sentiment(text)
 
-        # LLM分析
+        # LLM signal must be pre-fetched; async extraction not supported in sync context
         if llm_signal is None and self.llm_extractor:
-            # 这里需要异步调用，简化处理
-            logger.warning("需要异步调用LLM提取器")
-            llm_signal = None
+            logger.info("LLM信号未提供，跳过LLM对比（请使用 batch_compare 并传入预提取的信号）")
 
         comparison = {
             "finbert": {
@@ -435,6 +435,116 @@ class FinBERTComparator:
             return "FinBERT和LLM在情绪判断上基本一致，但存在一定差异"
         else:
             return "FinBERT和LLM在情绪判断上存在较大差异，需要进一步验证"
+
+
+class FinBERTFeatureGenerator:
+    """Generate and store FinBERT sentiment features for the risk model pipeline.
+
+    Runs FinBERT on news articles and stores results in the finbert_news_signals
+    table, parallel to llm_news_signals. These features are then used by
+    FeatureEngineer._merge_finbert_features() for ablation experiments.
+    """
+
+    def __init__(self, finbert_model: FinBERTModel, db_connection):
+        self.finbert = finbert_model
+        self.db = db_connection
+
+    def ensure_table(self):
+        """Create finbert_news_signals table if it does not exist."""
+        sql = """
+            CREATE TABLE IF NOT EXISTS finbert_news_signals (
+                signal_id SERIAL PRIMARY KEY,
+                news_id INTEGER REFERENCES news_items(news_id),
+                ticker VARCHAR(10) NOT NULL,
+                sentiment_score REAL,
+                positive_prob REAL,
+                negative_prob REAL,
+                neutral_prob REAL,
+                confidence REAL,
+                extracted_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(news_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_finbert_ticker ON finbert_news_signals(ticker);
+            CREATE INDEX IF NOT EXISTS idx_finbert_news ON finbert_news_signals(news_id);
+        """
+        with self.db.cursor() as cur:
+            cur.execute(sql)
+        self.db.commit()
+
+    def process_news_batch(
+        self, ticker: str, limit: int = 500, batch_size: int = 8
+    ) -> int:
+        """Run FinBERT on unprocessed news for a ticker and store results.
+
+        Args:
+            ticker: Stock ticker.
+            limit: Max news items to process.
+            batch_size: FinBERT batch size.
+
+        Returns:
+            Number of signals stored.
+        """
+        if not self.finbert.initialized:
+            logger.warning("FinBERT not initialized, cannot process news")
+            return 0
+
+        # Fetch news that don't have FinBERT signals yet
+        sql = """
+            SELECT ni.news_id, ni.title, ni.body
+            FROM news_items ni
+            WHERE ni.ticker = %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM finbert_news_signals fn
+                  WHERE fn.news_id = ni.news_id
+              )
+            ORDER BY ni.published_at DESC
+            LIMIT %s
+        """
+        with self.db.cursor() as cur:
+            cur.execute(sql, (ticker, limit))
+            rows = cur.fetchall()
+
+        if not rows:
+            logger.info(f"No unprocessed news for {ticker}")
+            return 0
+
+        news_ids = [r[0] for r in rows]
+        texts = [f"{r[1]}. {r[2]}" for r in rows]
+
+        logger.info(f"Running FinBERT on {len(texts)} news items for {ticker}")
+        results = self.finbert.analyze_batch(texts, batch_size=batch_size)
+
+        # Store results
+        stored = 0
+        with self.db.cursor() as cur:
+            for news_id, result in zip(news_ids, results):
+                cur.execute("""
+                    INSERT INTO finbert_news_signals
+                        (news_id, ticker, sentiment_score, positive_prob,
+                         negative_prob, neutral_prob, confidence)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (news_id) DO NOTHING
+                """, (
+                    news_id, ticker,
+                    result.sentiment_score,
+                    result.positive_score,
+                    result.negative_score,
+                    result.neutral_score,
+                    result.confidence,
+                ))
+                stored += 1
+
+        self.db.commit()
+        logger.info(f"Stored {stored} FinBERT signals for {ticker}")
+        return stored
+
+    def process_all_tickers(self, tickers: List[str], limit: int = 500) -> Dict[str, int]:
+        """Run FinBERT on all tickers and return per-ticker counts."""
+        self.ensure_table()
+        counts = {}
+        for ticker in tickers:
+            counts[ticker] = self.process_news_batch(ticker, limit=limit)
+        return counts
 
 # 使用示例
 if __name__ == "__main__":

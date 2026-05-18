@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 class DatabaseManager:
     """数据库管理器"""
 
+    # Whitelisted DuckDB table names to prevent SQL injection
+    VALID_DUCKDB_TABLES = {
+        'company_daily_features',
+        'market_summary',
+        'risk_analysis',
+        'credit_proxy_summary',
+        'news_signal_summary',
+    }
+
     def __init__(self, postgres_config: Dict[str, str], duckdb_path: str):
         """
         初始化数据库管理器
@@ -192,6 +201,9 @@ class DatabaseManager:
 
     def save_to_analytical_store(self, df: pd.DataFrame, table_name: str):
         """保存数据到DuckDB分析存储"""
+        if table_name not in self.VALID_DUCKDB_TABLES:
+            raise ValueError(f"Invalid table name: {table_name}. Must be one of {self.VALID_DUCKDB_TABLES}")
+
         try:
             # 注册DataFrame到DuckDB
             self.duckdb_conn.register('temp_df', df)
@@ -208,14 +220,32 @@ class DatabaseManager:
             logger.error(f"保存到DuckDB失败: {e}")
             raise
 
-    def load_from_analytical_store(self, table_name: str, where_clause: str = None) -> pd.DataFrame:
-        """从DuckDB分析存储加载数据"""
+    def load_from_analytical_store(
+        self, table_name: str, filters: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """从DuckDB分析存储加载数据
+
+        Args:
+            table_name: Must be in VALID_DUCKDB_TABLES whitelist.
+            filters: Optional dict of column=value filters (parameterized, not raw SQL).
+        """
+        if table_name not in self.VALID_DUCKDB_TABLES:
+            raise ValueError(f"Invalid table name: {table_name}. Must be one of {self.VALID_DUCKDB_TABLES}")
+
         try:
             query = f"SELECT * FROM {table_name}"
-            if where_clause:
-                query += f" WHERE {where_clause}"
+            params = []
+            if filters:
+                conditions = []
+                for key, value in filters.items():
+                    # Validate column name contains only safe characters
+                    if not key.replace('_', '').isalnum():
+                        raise ValueError(f"Invalid column name: {key}")
+                    conditions.append(f"{key} = ?")
+                    params.append(value)
+                query += " WHERE " + " AND ".join(conditions)
 
-            df = self.duckdb_conn.execute(query).df()
+            df = self.duckdb_conn.execute(query, params).df()
             logger.info(f"从DuckDB加载 {len(df)} 条记录从 {table_name}")
 
             return df

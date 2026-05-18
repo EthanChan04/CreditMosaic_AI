@@ -45,7 +45,9 @@ class BaseLLMProvider(ABC):
         pass
 
     @abstractmethod
-    async def generate_chat_completion(self, messages: List[Dict]) -> LLMResponse:
+    async def generate_chat_completion(
+        self, messages: List[Dict], temperature: float = None, max_tokens: int = None
+    ) -> LLMResponse:
         pass
 
 
@@ -66,13 +68,15 @@ class OpenAIProvider(BaseLLMProvider):
         return await self.generate_chat_completion(messages)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def generate_chat_completion(self, messages: List[Dict]) -> LLMResponse:
+    async def generate_chat_completion(
+        self, messages: List[Dict], temperature: float = None, max_tokens: int = None
+    ) -> LLMResponse:
         try:
             payload = {
                 "model": self.config.model_name,
                 "messages": messages,
-                "temperature": self.config.temperature,
-                "max_tokens": self.config.max_tokens
+                "temperature": temperature if temperature is not None else self.config.temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.config.max_tokens
             }
 
             async with aiohttp.ClientSession() as session:
@@ -165,16 +169,7 @@ class LLMProviderManager:
         if not provider:
             raise RuntimeError(f"No LLM provider available (requested: {provider_name})")
 
-        original_temp = provider.config.temperature
-        original_max_tokens = provider.config.max_tokens
-        provider.config.temperature = temperature
-        provider.config.max_tokens = max_tokens
-
-        try:
-            return await provider.generate_chat_completion(messages)
-        finally:
-            provider.config.temperature = original_temp
-            provider.config.max_tokens = original_max_tokens
+        return await provider.generate_chat_completion(messages, temperature=temperature, max_tokens=max_tokens)
 
 
 class LLMResponseValidator:

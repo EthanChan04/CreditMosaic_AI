@@ -10,7 +10,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Create non-root user
+RUN addgroup --system app && adduser --system --ingroup app app
 
 COPY apps ./apps
 COPY db ./db
@@ -19,6 +22,10 @@ COPY pipelines ./pipelines
 COPY services ./services
 COPY config.yaml .
 
+RUN chown -R app:app /app
+
+USER app
+
 EXPOSE 8000
 
-CMD ["uvicorn", "apps.api.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["gunicorn", "apps.api.app.main:app", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]

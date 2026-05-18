@@ -79,24 +79,52 @@ class LagAnalyzer:
                 continue
 
             lag_corrs = {}
+            lag_pvalues = {}
             for lag in self.LAG_WINDOWS:
                 shifted = credit_series.shift(lag).dropna()
                 common = eq_series.index.intersection(shifted.index)
                 if len(common) > 10:
                     corr = eq_series.loc[common].corr(shifted.loc[common])
                     lag_corrs[str(lag)] = round(float(corr), 4)
+                    # Compute p-value using t-distribution
+                    n = len(common)
+                    if abs(corr) < 1.0:
+                        t_stat = corr * np.sqrt((n - 2) / (1 - corr**2))
+                        from scipy import stats
+                        p_value = 2 * stats.t.sf(abs(t_stat), df=n - 2)
+                        lag_pvalues[str(lag)] = round(float(p_value), 6)
+                    else:
+                        lag_pvalues[str(lag)] = 0.0
                 else:
                     lag_corrs[str(lag)] = None
+                    lag_pvalues[str(lag)] = None
 
-            best_lag = max(
-                ((k, abs(v)) for k, v in lag_corrs.items() if v is not None),
-                key=lambda x: x[1], default=(None, 0)
-            )
+            # Find best lag (minimum p-value among significant correlations)
+            significant_lags = [
+                (k, abs(v), lag_pvalues[k])
+                for k, v in lag_corrs.items()
+                if v is not None and lag_pvalues[k] is not None and lag_pvalues[k] < 0.05
+            ]
+
+            if significant_lags:
+                best = max(significant_lags, key=lambda x: x[1])
+                best_lag = (best[0], best[1])
+                best_p = best[2]
+            else:
+                best = max(
+                    ((k, abs(v)) for k, v in lag_corrs.items() if v is not None),
+                    key=lambda x: x[1], default=(None, 0)
+                )
+                best_lag = best
+                best_p = lag_pvalues.get(best[0])
 
             lag_results[col] = {
                 'lag_correlations': lag_corrs,
+                'lag_pvalues': lag_pvalues,
                 'best_lag': int(best_lag[0]) if best_lag[0] is not None else None,
                 'best_correlation': best_lag[1],
+                'best_pvalue': best_p,
+                'significant_at_5pct': best_p is not None and best_p < 0.05,
             }
 
         same_day = {}

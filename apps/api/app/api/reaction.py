@@ -127,7 +127,7 @@ def get_reaction_by_news(
 @router.get("/ticker/{ticker}", summary="Reactions by ticker")
 def get_reaction_by_ticker(
     ticker: str,
-    days: int = Query(default=90, description="Days of history"),
+    days: int = Query(default=90, ge=1, le=365, description="Days of history"),
     svc=Depends(get_market_reaction_service),
 ):
     """Get recent market reactions for a specific ticker."""
@@ -144,7 +144,7 @@ def get_reaction_by_ticker(
 @router.post("/compare", response_model=CompareResponse, summary="Compare LLM vs observed")
 def compare_llm_vs_actual(
     tickers: List[str] = Query(..., description="Company tickers"),
-    days: int = Query(default=90, description="Days of history"),
+    days: int = Query(default=90, ge=1, le=365, description="Days of history"),
     svc=Depends(get_market_reaction_service),
 ):
     """Compare LLM-predicted market_impact_type against observed market reactions."""
@@ -163,7 +163,7 @@ def compare_llm_vs_actual(
 @router.get("/summary", summary="Reaction summary")
 def get_reaction_summary(
     tickers: str = Query(..., description="Comma-separated tickers"),
-    days: int = Query(default=90, description="Days of history"),
+    days: int = Query(default=90, ge=1, le=365, description="Days of history"),
     svc=Depends(get_market_reaction_service),
 ):
     """Get a combined reaction and lag analysis summary for a set of tickers."""

@@ -7,7 +7,7 @@ The legacy global singleton (NewsService / initialize_news_api) is retained
 for backward compatibility with pipeline scripts and direct imports.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
@@ -422,7 +422,7 @@ def get_news(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     is_processed: Optional[bool] = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
     db=Depends(get_db),
 ):
     """Query news items with optional filters by ticker, date range, and processing status."""
@@ -500,7 +500,7 @@ def get_signals(
     end_date: Optional[datetime] = None,
     min_credit_risk_score: Optional[int] = None,
     event_type: Optional[str] = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
     db=Depends(get_db),
 ):
     """Query LLM news signals with optional filters."""

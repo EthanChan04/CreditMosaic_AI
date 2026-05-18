@@ -163,7 +163,7 @@ def get_risk_scores(
 @router.get("/scores/{ticker}", response_model=RiskHistoryResponse, summary="Risk score history")
 def get_risk_history(
     ticker: str,
-    days: int = Query(default=90, description="Days of history"),
+    days: int = Query(default=90, ge=1, le=365, description="Days of history"),
     svc=Depends(get_risk_model_service),
 ):
     """Get risk score history for a single company over a configurable time window."""

@@ -256,6 +256,96 @@ class MarketReactionAnalyzer:
 
         return metrics
 
+    def compute_market_model_car(
+        self,
+        ticker_returns: pd.Series,
+        market_returns: pd.Series,
+        event_idx: int,
+        estimation_window: int = 50,
+        gap: int = 10
+    ) -> Dict[str, float]:
+        """Compute Cumulative Abnormal Return using a market model (CAPM-style).
+
+        Uses an estimation window [event_idx - estimation_window - gap, event_idx - gap]
+        to estimate alpha and beta, then computes abnormal returns in the event window.
+
+        Args:
+            ticker_returns: Daily returns series for the target ticker.
+            market_returns: Daily returns series for the market index (e.g., SPY).
+            event_idx: Index position of the event date.
+            estimation_window: Number of days for parameter estimation.
+            gap: Gap between estimation window end and event date.
+
+        Returns:
+            Dict with alpha, beta, CAR values, and t-statistic.
+        """
+        try:
+            # Align series
+            common_idx = ticker_returns.index.intersection(market_returns.index)
+            ticker_returns = ticker_returns.loc[common_idx]
+            market_returns = market_returns.loc[common_idx]
+
+            if len(common_idx) < estimation_window + gap + 5:
+                return {'error': 'Insufficient data for market model'}
+
+            # Estimation window: [event_idx - estimation_window - gap, event_idx - gap)
+            est_start = max(0, event_idx - estimation_window - gap)
+            est_end = event_idx - gap
+
+            y_est = ticker_returns.iloc[est_start:est_end].values
+            x_est = market_returns.iloc[est_start:est_end].values
+
+            # Remove NaN
+            valid = ~(np.isnan(y_est) | np.isnan(x_est))
+            y_est, x_est = y_est[valid], x_est[valid]
+
+            if len(x_est) < 20:
+                return {'error': 'Insufficient valid data in estimation window'}
+
+            # OLS: y = alpha + beta * x + epsilon
+            x_with_const = np.column_stack([np.ones(len(x_est)), x_est])
+            try:
+                beta_hat = np.linalg.lstsq(x_with_const, y_est, rcond=None)[0]
+            except np.linalg.LinAlgError:
+                return {'error': 'OLS estimation failed'}
+
+            alpha, beta = beta_hat[0], beta_hat[1]
+
+            # Event window: [event_idx, event_idx + 5)
+            event_end = min(event_idx + 5, len(ticker_returns))
+            y_event = ticker_returns.iloc[event_idx:event_end].values
+            x_event = market_returns.iloc[event_idx:event_end].values
+
+            # Abnormal returns = actual - expected
+            expected = alpha + beta * x_event
+            abnormal_returns = y_event - expected
+            car = float(np.nansum(abnormal_returns))
+
+            # T-statistic for CAR
+            est_residuals = y_est - (alpha + beta * x_est)
+            sigma = float(np.std(est_residuals, ddof=2))
+            n_ar = len(abnormal_returns)
+            car_std = sigma * np.sqrt(n_ar)
+            t_stat = car / car_std if car_std > 0 else 0.0
+
+            from scipy import stats
+            p_value = 2 * stats.t.sf(abs(t_stat), df=len(y_est) - 2)
+
+            return {
+                'alpha': round(float(alpha), 8),
+                'beta': round(float(beta), 4),
+                'car': round(car, 6),
+                'car_t_stat': round(t_stat, 4),
+                'car_p_value': round(float(p_value), 6),
+                'significant_at_5pct': p_value < 0.05,
+                'n_estimation_obs': len(y_est),
+                'n_event_obs': n_ar,
+            }
+
+        except Exception as e:
+            logger.error(f"Market model CAR computation failed: {e}")
+            return {'error': str(e)}
+
     def _detect_movement(self, reaction: MarketReaction) -> Tuple[bool, bool]:
         """Detect whether equity and credit markets showed significant reaction."""
         w0 = reaction.windows.get("0_1", {})

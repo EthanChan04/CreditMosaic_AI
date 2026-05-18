@@ -1,3 +1,4 @@
+.git
 .venv
 __pycache__
 *.py[cod]
@@ -14,3 +15,7 @@ creditmosaic_analytical.db
 .env
 .env.*
 !.env.example
+tests/
+docs/
+notebooks/
+*.md

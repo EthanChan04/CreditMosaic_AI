@@ -15,6 +15,7 @@ Usage:
 """
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -82,10 +83,13 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
-# CORS middleware
+# CORS middleware - restrict origins in production
+_cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

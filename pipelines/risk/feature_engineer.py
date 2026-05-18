@@ -42,6 +42,22 @@ class FeatureEngineer:
     MARKET_LAG_PERIODS = [1, 5, 20]
     LOOKBACK_DAYS = 365
 
+    # Features that are used directly in risk label computation.
+    # Including the current-day values of these as features causes data leakage
+    # because tree models can reconstruct the label thresholds from them.
+    # We keep only lagged versions (lag >= 6) to ensure the model only sees
+    # data from before the label computation window.
+    LABEL_PROXY_FEATURES = {
+        'returns_1d',        # used in abnormal_negative_return_1d label
+        'returns_5d',        # used in abnormal_negative_return_5d label
+        'volatility_5d',     # used in volatility_jump_5d label
+        'volatility_20d',    # used in volatility_jump_5d label (baseline)
+        'volume',            # used in abnormal_volume_spike_1d label
+        'volume_ma_20d',     # used in abnormal_volume_spike_1d label (baseline)
+        'volume_ma_5d',      # used in abnormal_volume_spike_5d label
+    }
+    SAFE_LAG_MIN = 6  # minimum lag to avoid label leakage
+
     def __init__(self, db_connection):
         self.db = db_connection
 
@@ -52,17 +68,30 @@ class FeatureEngineer:
             rows = cur.fetchall()
             return pd.DataFrame(rows, columns=columns)
 
+    # Available feature groups for ablation experiments
+    ALL_FEATURE_GROUPS = ['market', 'fundamentals', 'credit', 'llm', 'finbert', 'cross_sectional']
+
     def build_feature_matrix(
         self,
         tickers: List[str],
         end_date: datetime,
+        feature_groups: List[str] = None,
         lookback_days: int = None
     ) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
         """Build feature matrix X, label vector y, and metadata for ML training.
 
+        Args:
+            tickers: List of stock tickers.
+            end_date: End date for feature window.
+            feature_groups: Subset of ['market', 'fundamentals', 'credit', 'llm', 'finbert', 'cross_sectional'].
+                           If None, all groups are included.
+            lookback_days: Historical lookback window in days.
+
         Returns (X, y, meta) where meta contains ticker/date for each row.
         y is a binary target: 1 if any risk event within next 5 trading days.
         """
+        if feature_groups is None:
+            feature_groups = list(self.ALL_FEATURE_GROUPS)
         if lookback_days is None:
             lookback_days = self.LOOKBACK_DAYS
 
@@ -79,12 +108,22 @@ class FeatureEngineer:
             return pd.DataFrame(), pd.Series(), pd.DataFrame()
 
         features = self._build_market_features(market)
-        features = self._merge_fundamentals(features, fundamentals)
-        features = self._merge_credit_proxy(features, credit)
-        features = self._merge_llm_signals(features, signals)
-        features = self._add_cross_sectional(features)
+
+        if 'fundamentals' in feature_groups:
+            features = self._merge_fundamentals(features, fundamentals)
+        if 'credit' in feature_groups:
+            features = self._merge_credit_proxy(features, credit)
+        if 'llm' in feature_groups:
+            features = self._merge_llm_signals(features, signals)
+        if 'finbert' in feature_groups:
+            features = self._merge_finbert_features(features, tickers, start_date, end_date)
+        if 'cross_sectional' in feature_groups:
+            features = self._add_cross_sectional(features)
 
         X, y, meta = self._create_target(features, labels)
+
+        # Remove label proxy features to prevent data leakage
+        X = self._remove_label_proxy_features(X)
 
         logger.info(f"Built feature matrix: {X.shape[0]} rows x {X.shape[1]} features")
         return X, y, meta
@@ -179,6 +218,11 @@ class FeatureEngineer:
                     if feat in tdf.columns:
                         tdf[f'{feat}_lag{lag}'] = tdf[feat].shift(lag)
 
+            # Add safe-lagged versions of label proxy features (lag >= SAFE_LAG_MIN)
+            for feat in self.LABEL_PROXY_FEATURES:
+                if feat in tdf.columns:
+                    tdf[f'{feat}_lag{self.SAFE_LAG_MIN}'] = tdf[feat].shift(self.SAFE_LAG_MIN)
+
             for lag in [1, 5]:
                 if 'returns_1d' in tdf.columns:
                     tdf[f'rolling_return_{lag}d'] = (
@@ -192,8 +236,13 @@ class FeatureEngineer:
             if 'high_price' in tdf.columns and 'low_price' in tdf.columns and 'close_price' in tdf.columns:
                 tdf['daily_range'] = (tdf['high_price'] - tdf['low_price']) / tdf['close_price']
 
+            # volume_ratio uses current-day volume, which leaks into labels;
+            # use lagged version instead
             if 'volume' in tdf.columns and 'volume_ma_20d' in tdf.columns:
-                tdf['volume_ratio'] = tdf['volume'] / tdf['volume_ma_20d'].replace(0, np.nan)
+                tdf['volume_ratio_lag6'] = (
+                    tdf['volume'].shift(self.SAFE_LAG_MIN) /
+                    tdf['volume_ma_20d'].shift(self.SAFE_LAG_MIN).replace(0, np.nan)
+                )
 
             result_rows.append(tdf)
 
@@ -304,10 +353,99 @@ class FeatureEngineer:
 
         return features
 
+    def _merge_finbert_features(
+        self, features: pd.DataFrame, tickers: List[str],
+        start_date: datetime, end_date: datetime
+    ) -> pd.DataFrame:
+        """Merge FinBERT sentiment features into the feature matrix.
+
+        FinBERT features are aggregated as 7-day rolling averages, matching
+        the LLM signal feature structure for fair ablation comparison.
+        """
+        if features.empty:
+            return features
+
+        sql = """
+            SELECT fns.ticker, ni.published_at as date,
+                   fns.sentiment_score, fns.positive_prob,
+                   fns.negative_prob, fns.neutral_prob, fns.confidence
+            FROM finbert_news_signals fns
+            JOIN news_items ni ON fns.news_id = ni.news_id
+            WHERE fns.ticker = ANY(%s)
+              AND ni.published_at BETWEEN %s AND %s
+        """
+        try:
+            df = self._query(sql, (tickers, start_date, end_date))
+        except Exception:
+            # Table may not exist yet; fill with zeros
+            for col in ['finbert_sentiment_avg_7d', 'finbert_positive_avg_7d',
+                        'finbert_negative_avg_7d', 'finbert_confidence_avg_7d']:
+                features[col] = 0.0
+            return features
+
+        if df.empty:
+            for col in ['finbert_sentiment_avg_7d', 'finbert_positive_avg_7d',
+                        'finbert_negative_avg_7d', 'finbert_confidence_avg_7d']:
+                features[col] = 0.0
+            return features
+
+        df['date'] = pd.to_datetime(df['date']).dt.normalize()
+
+        agg_rows = []
+        for ticker in features['ticker'].dropna().unique():
+            feature_dates = (
+                features.loc[features['ticker'] == ticker, 'date']
+                .pipe(pd.to_datetime).dt.normalize().drop_duplicates().sort_values()
+            )
+            if feature_dates.empty:
+                continue
+
+            tdf = df[df['ticker'] == ticker].copy()
+            if tdf.empty:
+                agg_rows.append(pd.DataFrame({
+                    'date': feature_dates, 'ticker': ticker,
+                    'finbert_sentiment_avg_7d': 0.0,
+                    'finbert_positive_avg_7d': 0.0,
+                    'finbert_negative_avg_7d': 0.0,
+                    'finbert_confidence_avg_7d': 0.0,
+                }))
+                continue
+
+            daily = tdf.groupby('date').agg(
+                daily_sentiment=('sentiment_score', 'mean'),
+                daily_positive=('positive_prob', 'mean'),
+                daily_negative=('negative_prob', 'mean'),
+                daily_confidence=('confidence', 'mean'),
+            ).sort_index()
+
+            daily = daily.reindex(feature_dates, fill_value=0.0)
+            rolling = daily.rolling('7D', min_periods=1)
+            agg_rows.append(pd.DataFrame({
+                'date': feature_dates,
+                'ticker': ticker,
+                'finbert_sentiment_avg_7d': rolling['daily_sentiment'].mean().values,
+                'finbert_positive_avg_7d': rolling['daily_positive'].mean().values,
+                'finbert_negative_avg_7d': rolling['daily_negative'].mean().values,
+                'finbert_confidence_avg_7d': rolling['daily_confidence'].mean().values,
+            }))
+
+        if agg_rows:
+            all_agg = pd.concat(agg_rows, ignore_index=True)
+            features = features.copy()
+            features['date'] = pd.to_datetime(features['date']).dt.normalize()
+            merged = features.merge(all_agg, on=['ticker', 'date'], how='left')
+            for col in ['finbert_sentiment_avg_7d', 'finbert_positive_avg_7d',
+                        'finbert_negative_avg_7d', 'finbert_confidence_avg_7d']:
+                merged[col] = merged[col].fillna(0.0)
+            return merged
+
+        return features
+
     def _add_cross_sectional(self, features: pd.DataFrame) -> pd.DataFrame:
         df = features.copy()
 
-        for col in ['returns_1d', 'volatility_5d', 'volume_ratio']:
+        # Use safe-lagged features for cross-sectional ranks to avoid leakage
+        for col in ['returns_1d_lag6', 'volatility_5d_lag6', 'volume_ratio_lag6']:
             if col in df.columns:
                 df[f'{col}_rank'] = df.groupby('date')[col].rank(pct=True)
 
@@ -315,11 +453,49 @@ class FeatureEngineer:
             df['debt_to_assets_rank'] = df['debt_to_assets'].rank(pct=True)
             df['high_leverage'] = (df['debt_to_assets'] > df['debt_to_assets'].median()).astype(int)
 
-        if 'returns_1d' in df.columns and 'volatility_5d' in df.columns:
-            df['return_vol_ratio'] = df['returns_1d'] / df['volatility_5d'].replace(0, np.nan)
+        if 'returns_1d_lag6' in df.columns and 'volatility_5d_lag6' in df.columns:
+            df['return_vol_ratio'] = df['returns_1d_lag6'] / df['volatility_5d_lag6'].replace(0, np.nan)
             df['abs_return_vol_ratio'] = np.abs(df['return_vol_ratio'])
 
         return df
+
+    def _remove_label_proxy_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Remove features that directly proxy for label computation to prevent leakage.
+
+        The risk labels are computed from current-day values of returns_1d,
+        volatility_5d, volume, etc. If these same columns appear as features,
+        tree models can reconstruct the label thresholds and achieve artificially
+        high AUC. We keep only the lagged versions (lag >= SAFE_LAG_MIN).
+        """
+        cols_to_remove = []
+        for col in X.columns:
+            base = col.split('_lag')[0] if '_lag' in col else col
+            if base in self.LABEL_PROXY_FEATURES and '_lag' not in col:
+                cols_to_remove.append(col)
+            # Also remove lagged versions with lag < SAFE_LAG_MIN
+            elif '_lag' in col:
+                base_name = col.split('_lag')[0]
+                if base_name in self.LABEL_PROXY_FEATURES:
+                    try:
+                        lag_val = int(col.split('_lag')[-1])
+                        if lag_val < self.SAFE_LAG_MIN:
+                            cols_to_remove.append(col)
+                    except ValueError:
+                        pass
+
+        # Also remove rolling features computed from label proxy columns with insufficient lag
+        for col in list(X.columns):
+            if col.startswith('rolling_return_') or col.startswith('rolling_vol_'):
+                # These are rolling means of returns_1d / volatility_5d over 1-5 days
+                # which overlap with the label computation window
+                cols_to_remove.append(col)
+
+        cols_to_remove = list(set(cols_to_remove))
+        if cols_to_remove:
+            logger.info(f"Removing {len(cols_to_remove)} label proxy features: {cols_to_remove}")
+            X = X.drop(columns=[c for c in cols_to_remove if c in X.columns])
+
+        return X
 
     def _create_target(
         self,
